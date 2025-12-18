@@ -11,7 +11,7 @@
 # --------------------------------------------------
 # Setup
 # --------------------------------------------------
-setwd("C:/Users/Wakamatsu/Dropbox/Biblio")
+#setwd("C:/Users/Wakamatsu/Dropbox/Biblio")
 
 # --------------------------------------------------
 # Load required packages
@@ -250,4 +250,5 @@ legend(
   pt.cex = 1.2,
   bty = "n"
 )
+
 

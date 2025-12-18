@@ -9,304 +9,245 @@
 # **************************************************************
 
 # --------------------------------------------------
-# Program Setup
+# Setup
 # --------------------------------------------------
-
-# Set working directory (update this path as needed)
-setwd("~/Research/PICES/WG49/Biblio")
-
+setwd("C:/Users/Wakamatsu/Dropbox/Biblio")
 
 # --------------------------------------------------
-# Load Required Packages
+# Load required packages
 # --------------------------------------------------
-
-# Install and load the 'haven' package to read Stata .dta files
-#install.packages("haven")
-library(haven)
-#install.packages("bibliometrix")
-library(bibliometrix)
-#install.packages("quanteda")
-library(quanteda)
-library(ggplot2)
-1library(dplyr)
-library(stringr)
-library(ggplot2)
-library(tidygraph)
-#install.packages("ggraph")
-library(ggraph)
+required_packages <- c(
+  "dplyr","stringr","quanteda","tidyr","igraph"
+)
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if (length(new_packages) > 0) install.packages(new_packages, dependencies = TRUE)
+invisible(lapply(required_packages, library, character.only = TRUE))
 
 # --------------------------------------------------
 # Load Data
 # --------------------------------------------------
+review <- read.csv("included.csv", stringsAsFactors = FALSE) %>% as.data.frame()
 
-# Read csv files of raw data (pacific) and screened data (review_data)
-pacific <- read.csv("Pacific.csv", stringsAsFactors = FALSE)
-review <- read.csv("review_data.csv", stringsAsFactors = FALSE)
-
-# decapitalize, remove spaces and convert to common format
-pacific <- pacific %>%
-  mutate(
-    Title_lower = tolower(str_trim(Title))
-  )
+# --------------------------------------------------
+# Text Cleaning
+# --------------------------------------------------
+clean_text <- function(x) {
+  x %>%
+    str_remove_all("<[^>]+>") %>%
+    str_remove_all("[\\(\\)\"':/\\?]") %>%
+    str_replace_all("\\s{2,}", " ") %>%
+    str_trim()
+}
 
 review <- review %>%
   mutate(
-    Title_lower = tolower(str_trim(Title))
+    Title    = clean_text(Title),
+    Abstract = clean_text(Abstract)
   )
 
-# Matching with titles
-# Make titles decap
-matched_all <- inner_join(pacific, review, by = "Title_lower")
-# Rename var name of keywords from Automatic.Tags.x to Manual.Tags.x because papers contain keywords in either variable
-matched_all <- matched_all %>%
-  mutate(
-    Manual.Tags.x = if_else(
-      is.na(Manual.Tags.x) | str_trim(Manual.Tags.x) == "",
-      Automatic.Tags.x,
-      Manual.Tags.x
-    )
-  )
+texts <- paste(review$Title, review$Abstract, sep = ". ")
 
-# Remove duplicates and remove one with less information
-matched_unique <- matched_all %>%
-  group_by(Title_lower) %>%
-  slice_max(order_by = rowSums(!is.na(across(everything()))), n = 1, with_ties = FALSE) %>%
-  ungroup()
+corp <- corpus(texts, docnames = paste0("doc_", seq_along(texts)))
 
-# See the result of matching
-cat("Matched ", nrow(matched_unique), " / ", nrow(review), "Total\n")
-
-# 3 mismatched papers --> matched data
-keys_to_add <- c("FUP3RWJK", "GNLUIS6T", "JGEQLCZ4")
-
-# Detect 3 papers in Pacific.csv
-rows_to_add <- pacific %>% filter(Key %in% keys_to_add)
-
-# Add these to matched_unique
-matched_unique <- bind_rows(matched_unique, rows_to_add)
-
-# See the result of matching
-cat("Matched：", nrow(matched_unique), " / ", nrow(review), "Total\n")
-
-# save to csv
-write.csv(matched_unique, "matched_pacific_output.csv", row.names = FALSE)
-
-# Analyze using Bibliometrix
-# Convert variable names for bibliometrix
-M <- matched_unique %>%
-  rename(
-    AU = Author.x,            # Authors
-    TI = Title.x,             # Title
-    SO = `Publication.Title.x`, # Source (Journal or Book Title)
-    DT = Item.Type.x,         # Document Type
-    PY = Publication.Year.x,  # Publication Year
-    DE = Manual.Tags.x,       # Author Keywords (manual tags here)
-    AB = Abstract.Note.x,     # Abstract
-    DI = DOI.x,               # DOI
-    SN = ISSN.x,              # ISSN
-    IS = Issue.x,             # Issue
-    VL = Volume.x,            # Volume
-    BP = Pages.x,             # Beginning page (if page numbers)
-    UT = `Archive.Location.x`,# Accession Number / WOS ID
-    DB = Library.Catalog.x,    # Database (if applicable)
-    ID = Manual.Tags.x
-  )
-
-M$DB <- "wos"
-
-write.csv(M, "biblio_ready.csv", row.names = FALSE)
-M_csv <- read.csv("biblio_ready.csv", stringsAsFactors = FALSE)
-data <- convert2df(as.data.frame(M_csv_raw), dbsource = "isi", format = "csv")
-
-
-
-# Display summary of the dataset
-results <- biblioAnalysis(data, sep = ";")
-summary <- summary(object = results, k = 10)
-
-# Authors' Production over Time
-authors <- authorProdOverTime(data)
-
-
-
-# Plot collaboration network (authors)
-netmatrix <- biblioNetwork(data, analysis = "collaboration", network = "authors", sep = ";")
-networkPlot(netmatrix, n = 30, Title = "Collaboration Network", type = "fruchterman", size = T)
-
-keyword_pairs <- keyword_pairs %>%
-  mutate(
-    from = tolower(str_trim(from)),
-    to   = tolower(str_trim(to)),
-    
-    # california current → Cal. current
-    from = ifelse(from == "california current", "Cal. current", from),
-    to   = ifelse(to   == "california current", "Cal. current", to),
-    
-    # ocean acidification → acidification
-    from = ifelse(from == "ocean acidification", "acidification", from),
-    to   = ifelse(to   == "ocean acidification", "acidification", to),
-    
-    # marine heatwave variants → MHW
-    from = ifelse(from %in% c("marine heatwave", "marine heatwaves", "marine heat wave", "marine heat waves"),
-                  "MHW", from),
-    to   = ifelse(to %in% c("marine heatwave", "marine heatwaves", "marine heat wave", "marine heat waves"),
-                  "MHW", to),
-    
-    # anthropogenic co2 → co2
-    from = ifelse(from == "anthropogenic co2", "co2", from),
-    to   = ifelse(to   == "anthropogenic co2", "co2", to),
-    
-    # climate-change → climate change
-    from = ifelse(from == "climate-change", "climate change", from),
-    to   = ifelse(to   == "climate-change", "climate change", to),
-    
-    # climate → climate change
-    from = ifelse(from == "climate", "climate change", from),
-    to   = ifelse(to   == "climate", "climate change", to),
-    
-    # sea surface temperature variants → sst
-    from = ifelse(from %in% c("sea surface temperature", "sea-surface temperature", "temperature"),
-                  "SST", from),
-    to   = ifelse(to %in% c("sea surface temperature", "sea-surface temperature", "temperature"),
-                  "SST", to),
-    
-    # el nino variants → enso
-    from = ifelse(from %in% c("el nino", "el-nino", "el.nino"), "ENSO", from),
-    to   = ifelse(to   %in% c("el nino", "el-nino", "el.nino"), "ENSO", to)
-  ) %>%
-  filter(
-    !from %in% c("pacific", "north pacific", "water", "ocean"),
-    !to   %in% c("pacific", "north pacific", "water", "ocean")
-  )
-
-
-# Optional: keyword co-occurrence network
-# 1. from側のキーワード出現頻度で上位30を抽出
-top_keywords <- keyword_pairs %>%
-  count(from, sort = TRUE) %>%
-  top_n(40, n) %>%
-  pull(from)
-
-# 2. 上位キーワード同士に絞って共起ペア抽出
-filtered_pairs <- keyword_pairs %>%
-  filter(from %in% top_keywords & to %in% top_keywords)
-
-
-# グラフ再作成
-g_filtered <- graph_from_data_frame(filtered_pairs, directed = FALSE)
-layout_matrix <- layout_with_fr(g_filtered)
-
-# ノードを半透明の青系に（alpha = 0.4 で透け感を出す）
-node_color <- rgb(0.2, 0.4, 0.8, alpha = 0.4)  # R,G,B = 青系, alpha = 透明度
-
-# エッジも少し透かす（任意）
-edge_color <- rgb(0.3, 0.3, 0.3, alpha = 0.5)  # 灰色半透明
-
-# グラフ描画
-plot(
-  g_filtered,
-  layout = layout_matrix,
-  vertex.color = node_color,        # ★ 透明ノード
-  vertex.label.cex = 1.1,
-  vertex.size = degree(g_filtered)^0.5 + 5,
-  vertex.label.color = "black",
-  edge.color = edge_color,          # 半透明線（任意）
-  edge.width = E(g_filtered)$weight,
-  main = "Keyword Co-occurrence"
+# --------------------------------------------------
+# Tokenization and vocabulary reduction
+# --------------------------------------------------
+custom_stop <- c(
+  "coast","relat","area","differ","indic","signific","condit","observ",
+  "studi","result","data","using","used","use","based","analysis","larg","pattern",
+  "show","shows","showed","can","may","also","within","among","caus","trend",
+  "observed","however","here","paper", "event","high", "ecolog","negat",
+  "year","years", "due", "associated", "condition", "conditions","two","time","low",
+  "northeast", "period","northern","southern","degre","across","increase","increased","sea",
+  "similar","temperature", "reduc","temperatures","change","changes","2014-2016","occur",
+  "decad","import","declin","shift","environment","suggest","associ","frequenc","mean","howev","recent",
+  "persist","strong", "forag","mix","posit","potenti","analysi","decreas","contribut", "understand",
+  "rate","includ","examin","spatial","heat","climate","water","product","chang","level","find",
+  "compar","provid","affect","temperatur","record","higher","intens","tropic","influenc","averag","assess",
+  "season","along","state","biolog","variabl","region","rang","variat","climat","follow","like","current",
+  "found","structur","investig","site","system","earli","near","reveal","day","china","forc",
+  "valu","three","identifi","base","scale","develop","role","limit","process","first",
+  "western","combin","central","relationship","collect","continu","experienc","histor","interannu",
+  "total","unpreced","remain","addit","organ","lead","factor","domin","distribut","major","large-scal",
+  "summer","winter","spring","north","south","west","east", #checked if season or location is associated with network graph
+  "long-term","subtrop","lower","model"
 )
 
 
+# Abbreviation and variant normalization dictionary
+abbr_dict <- list(
+  ocean_acidification = c("oa", "o.a."),
+  temperature = c("sst"),
+  mhw = c("mhw","mhws"),
+  el_nino = c("enso", "el nino"),
+  anomali = c("anomalies","anomaly")
+)
 
-#Extract Title + Abstract for quanteda
-texts <- paste(data$TI, data$AB, sep = ". ")
-docnames <- make.unique(data$TI)
+toks <- tokens(
+  corp,
+  remove_punct   = TRUE,
+  remove_numbers = TRUE
+) %>%
+  tokens_tolower() %>%
+  tokens_remove(stopwords("en")) %>%
+  # Normalize abbreviations and spelling variants
+  tokens_replace(
+    pattern = unlist(abbr_dict),
+    replacement = rep(names(abbr_dict), lengths(abbr_dict)),
+    valuetype = "fixed"
+  ) %>%
+  # Ensure mhw and mhws are unified
+  tokens_replace(
+    pattern = c("mhws"),
+    replacement = c("mhw"),
+    valuetype = "fixed"
+  ) %>%
+  # Apply English stemming
+  tokens_wordstem(language = "english") %>%
+  # Force unification of anomal / anomali after stemming
+  tokens_replace(
+    pattern = c("anomal", "anomali"),
+    replacement = c("anomali", "anomali"),
+    valuetype = "fixed"
+  ) %>%
+  # Remove custom stopwords
+  tokens_remove(custom_stop) %>%
+  # Remove tokens shorter than three characters
+  tokens_keep(min_nchar = 3)
 
-# Create corpus
-corp <- corpus(texts, docnames = docnames)
+# --------------------------------------------------
+# Construct and trim document–feature matrix
+# --------------------------------------------------
+dfm0 <- dfm(toks) %>%
+  dfm_trim(min_termfreq = 3) %>%                 # Remove low-frequency terms
+  dfm_trim(max_docfreq  = 0.60, docfreq_type="prop")  # Remove overly common terms
 
-# Tokenize
-tokens_all <- tokens(corp, remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE)
+# Convert DFM to long format (doc_id, token)
+token_ta <- quanteda::convert(dfm0, to="data.frame") %>%
+  pivot_longer(cols = -doc_id, names_to = "token", values_to = "freq") %>%
+  filter(freq > 0) %>%
+  select(doc_id, token)
 
-# Define a topic-specific dictionary
-topic_dict <- dictionary(list(
-  MHW = c("marine heatwave", "heatwaves", "MHW", "marine heat wave", "marine heat waves", "ENSO", "el-nino", "el nino"),
-  Hypoxia = c("hypoxia", "low oxygen", "deoxygenation"),
-  OA = c("acidification", "ocean acidification", "ph", "calcification", "california current", "co2"),
-  Climate = c("climate change", "warming", "global warming"),
-  Social = c("fishery", "fisheries", "aquaculture", "community", "communities", "resilience"),
-  Ecosystem = c("ecosystem","zooplankton","fish", "mortality")
-))
+# --------------------------------------------------
+# Dictionary-based semantic standardization
+# --------------------------------------------------
+token_dict <- list(
+  mhw = c("marine heatwave","marine heatwaves","heatwave","heat wave","heat waves",
+          "north pacific marine heatwave","northeast pacific marine heatwave",
+          "pacific marine heatwave","extreme heatwave","heatwaves"),
+  co2 = c("carbon dioxide","anthropogenic co2","co2 emissions"),
+  sst = c("sea surface temperature","sea surface temperatures","surface temperature",
+          "water temperature","temperature extremes","marine extreme temperature","sst"),
+  enso = c("el nino","enso","nino"),
+  climate_change = c("climate change","climate","climate event","climate events",
+                     "global warming","warm"),
+  acidification = c("ocean acidification")
+)
 
-# Build document-feature matrix and lookup dictionary
-dfm_topic <- dfm(tokens_all)
-dfm_topics <- dfm_lookup(dfm_topic, dictionary = topic_dict)
-topic_counts <- convert(dfm_topics, to = "data.frame")
+standardize_token <- function(x, dict) {
+  out <- x
+  for (key in names(dict)) out[x %in% dict[[key]]] <- key
+  out
+}
 
+token_ta <- token_ta %>%
+  mutate(token = standardize_token(token, token_dict))
 
-# Classify documents by dominant topic
-topic_cols <- c("MHW", "Hypoxia", "OA", "Climate", "Social", "Ecosystem")
+# --------------------------------------------------
+# Limit terms used for visualization (Top N by frequency)
+# --------------------------------------------------
+top_n_words <- 70
 
-topic_class <- topic_counts %>%
-  mutate(doc = doc_id) %>%
-  rowwise() %>%
-  mutate(
-    Top_Topic = topic_cols[which.max(c_across(all_of(topic_cols)))]
-  )
+term_freq_all <- colSums(dfm0)
+top_terms <- names(sort(term_freq_all, decreasing = TRUE))[1:min(top_n_words, length(term_freq_all))]
 
+token_ta_top <- token_ta %>%
+  mutate(token = as.character(token)) %>%
+  filter(token %in% top_terms)
 
-# View classification result
-head(topic_class[, c("doc", "Top_Topic")])
+# --------------------------------------------------
+# Construct co-occurrence network (Top N terms)
+# --------------------------------------------------
+token_pairs <- token_ta_top %>%
+  distinct(doc_id, token) %>%
+  group_by(doc_id) %>%
+  summarise(
+    pairs = list({
+      toks2 <- sort(unique(token))
+      if (length(toks2) >= 2) {
+        as.data.frame(t(combn(toks2, 2)), stringsAsFactors = FALSE) %>%
+          setNames(c("from","to"))
+      } else NULL
+    }),
+    .groups = "drop"
+  ) %>%
+  filter(!sapply(pairs, is.null)) %>%
+  tidyr::unnest(pairs)
 
-topic_class %>%
-  count(Top_Topic) %>%
-  ggplot(aes(x = reorder(Top_Topic, -n), y = n, fill = Top_Topic)) +
-  geom_bar(stat = "identity") +
-  labs(title = "Number of Documents by topic", x = "Topics", y = "Frequency") +
-  theme_minimal() +
-  theme(legend.position = "none")
+cooccur_df <- token_pairs %>%
+  count(from, to, sort = TRUE)
 
-# 1. Join topic classification with publication year
-topic_with_year <- topic_class %>%
-  left_join(data %>% select(TI, PY), by = c("doc" = "TI"))  # assuming doc names match titles
+min_edge <- 2
+filtered_pairs <- cooccur_df %>%
+  filter(n >= min_edge)
 
-# 2. Count documents per topic per year, excluding year 2025
-topic_trend <- topic_with_year %>%
-  filter(PY != 2025) %>%         # Exclude 2025
-  count(PY, Top_Topic)
+g <- graph_from_data_frame(filtered_pairs, directed = FALSE)
+E(g)$weight <- filtered_pairs$n
 
-# 3. Plot
-ggplot(topic_trend, aes(x = PY, y = n, color = Top_Topic)) +
-  geom_line(size = 1) +
-  labs(
-    title = "Topic Trends by Year",
-    x = "Year",
-    y = "Number of Documents",
-    color = "Topic"
-  ) +
-  scale_x_continuous(
-    breaks = seq(min(topic_trend$PY), max(topic_trend$PY), by = 2) 
-  ) +
-  theme_minimal()
+# Remove isolated nodes
+g <- induced_subgraph(g, vids = V(g)[degree(g) > 0])
 
-# Other Plot of Keyword Co-occurrence Network
-ggraph(g_tbl, layout = "fr") +  # Fruchterman-Reingold layout
-  geom_edge_link(aes(width = weight), alpha = 0.3, color = "gray40") +
-  geom_node_point(aes(size = degree(g)), color = "steelblue", alpha = 0.7) +
-  geom_node_text(aes(label = name), repel = TRUE, size = 4) +
-  theme_void() +
-  labs(title = "Keyword Co-occurrence Network") +
-  theme(plot.title = element_text(hjust = 0.5))
+# --------------------------------------------------
+# Node size based on term frequency
+# --------------------------------------------------
+V(g)$tf <- as.numeric(term_freq_all[as.character(V(g)$name)])
+V(g)$tf[is.na(V(g)$tf)] <- 0
 
-# Show only labels at higher degree
-g_tbl <- g_tbl %>%
-  mutate(label = ifelse(degree(g) >= 5, name, ""))
+tf_min <- min(V(g)$tf)
+tf_max <- max(V(g)$tf)
+vsize <- 6 + 34 * (V(g)$tf - tf_min) / (tf_max - tf_min + 1e-9)
 
-ggraph(g_tbl, layout = "fr") +
-  geom_edge_link(aes(width = weight), alpha = 0.3, color = "gray40") +
-  geom_node_point(aes(size = degree(g)), color = "steelblue", alpha = 0.7) +
-  geom_node_text(aes(label = label), repel = TRUE, size = 4, max.overlaps = Inf) +
-  theme_void() +
-  labs(title = "Keyword Co-occurrence Network") +
-  theme(plot.title = element_text(hjust = 0.5))
+# Edge width based on co-occurrence strength
+ew <- E(g)$weight
+ew <- 1 + 4 * (ew - min(ew)) / (max(ew) - min(ew) + 1e-9)
 
+# --------------------------------------------------
+# Community detection and color assignment
+# --------------------------------------------------
+clusters <- cluster_louvain(g, weights = E(g)$weight)
+V(g)$cluster <- as.character(membership(clusters))
+
+cluster_ids <- sort(unique(V(g)$cluster))
+cluster_colors_map <- setNames(rainbow(length(cluster_ids)), cluster_ids)
+V(g)$color <- adjustcolor(cluster_colors_map[V(g)$cluster], alpha.f = 0.55)
+
+# --------------------------------------------------
+# Plot the co-occurrence network
+# --------------------------------------------------
+set.seed(123)
+layout_fr <- layout_with_fr(g, weights = E(g)$weight, niter = 2000)
+
+par(mar = c(0, 0, 3, 0))
+plot(
+  g,
+  layout = layout_fr,
+  vertex.label = V(g)$name,
+  vertex.label.cex = 0.8,
+  vertex.label.color = "black",
+  vertex.color = V(g)$color,
+  vertex.frame.color = "black",
+  vertex.size = vsize,
+  edge.width = ew,
+  edge.color = "gray70",
+  main = paste0("Token Co-occurrence Network (Top ", top_n_words, " terms)")
+)
+
+legend(
+  "bottomleft",
+  legend = paste0("Cluster ", cluster_ids),
+  col = cluster_colors_map[cluster_ids],
+  pch = 19,
+  pt.cex = 1.2,
+  bty = "n"
+)
 

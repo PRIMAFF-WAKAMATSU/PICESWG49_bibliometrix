@@ -4,8 +4,6 @@
 # Last modified:         Sys.Date() by Hiroki Wakamatsu
 # Program Description:   PICES WG49 bibliometric analysis
 # Authors:               hwakamatsu@affrc.go.jp
-# Data In:               path: "C:\Users\Wakamatsu\Documents\Research\PICES\WG49\Biblio\Bibliometrics.R"
-# Data Out:              path: "C:\Users\Wakamatsu\Documents\Research\PICES\WG49\Biblio\Bibliometrics.R"
 # **************************************************************
 
 # --------------------------------------------------
@@ -250,5 +248,6 @@ legend(
   pt.cex = 1.2,
   bty = "n"
 )
+
 
 
